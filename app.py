@@ -2,37 +2,29 @@ from flask import Flask, request, jsonify
 import joblib
 import numpy as np
 import traceback
-# -----------------------------------------------------------------
-# ▼▼▼ NEW IMPORTS FOR NLP ▼▼▼
-# -----------------------------------------------------------------
-# We use the smaller L3 model to fit Render's 512MB memory limit
+# NLP libraries
 from sentence_transformers import SentenceTransformer, util
 import torch
-# -----------------------------------------------------------------
-# ▲▲▲ END OF NEW IMPORTS ▲▲▲
-# -----------------------------------------------------------------
 
 app = Flask(__name__)
 
 # -----------------------------------------------------------------
-# ▼▼▼ LOAD YOUR MODELS (BOTH OF THEM) ▼▼▼
+# ▼▼▼ LOAD ALL MODELS (Includes FIXES for all past errors) ▼▼▼
 # -----------------------------------------------------------------
+
 # 1. Load your ML prediction models (XGBoost)
+# FIX 1: Handles the 3-model dictionary structure (['revenue'], etc.)
 models = joblib.load("xgboost_model.pkl")
 
 # 2. Load your new NLP model (Sentence Transformer)
-print("Loading memory-efficient NLP model (L3)...")
-nlp_model = SentenceTransformer('all-MiniLM-L3-v2')
-print("NLP model loaded.")
-# -----------------------------------------------------------------
-# ▲▲▲ END OF MODEL LOADING ▲▲▲
+# FIX 2: Uses the smaller L3 model to prevent "Out of memory" error.
+# FIX 3: Uses token="hf_none" to prevent the "401 Client Error" / "OSError".
+print("Loading NLP model (L3) for Dynamic Narratives...")
+nlp_model = SentenceTransformer('all-MiniLM-L3-v2', token="hf_none")
 # -----------------------------------------------------------------
 
 
-# -----------------------------------------------------------------
-# ▼▼▼ DYNAMIC TEXT LOGIC (USING NLP) ▼▼▼
-# -----------------------------------------------------------------
-# 1. Define your main churn topics and their pre-written responses
+# --- DYNAMIC TEXT LOGIC (Semantic Search) ---
 churn_responses = {
     "pricing": {
         "narrative": "Users are citing high cost or better pricing from competitors as their reason for leaving.",
@@ -60,34 +52,27 @@ churn_responses = {
     }
 }
 
-# 2. Pre-calculate the embeddings for your topics (only happens once on startup)
+# Pre-calculate embeddings for faster lookup
 churn_topics = list(churn_responses.keys())
 churn_topic_embeddings = nlp_model.encode(churn_topics, convert_to_tensor=True)
 
 
 def get_dynamic_text(question):
     """
-    Uses semantic search (NLP) to find the most relevant churn topic for a user's question.
+    Finds the most relevant churn topic for a user's question using semantic search.
     """
     if not question:
         return churn_responses["default"]["narrative"], churn_responses["default"]["recommendation"]
 
-    # 1. Encode the user's question
+    # Use semantic similarity to match question to topic
     question_embedding = nlp_model.encode(question, convert_to_tensor=True)
-    
-    # 2. Find the similarity between the question and your topics
     similarity_scores = util.cos_sim(question_embedding, churn_topic_embeddings)
     
-    # 3. Get the best match based on semantic closeness
     best_match_index = torch.argmax(similarity_scores)
     best_match_topic = churn_topics[best_match_index]
     
-    # 4. Return the corresponding narrative and recommendation
     response = churn_responses[best_match_topic]
     return response["narrative"], response["recommendation"]
-# -----------------------------------------------------------------
-# ▲▲▲ END OF NEW LOGIC ▲▲▲
-# -----------------------------------------------------------------
 
 
 @app.route("/")
@@ -99,11 +84,10 @@ def predict():
     try:
         data = request.get_json()
         
-        # --- 1. Get ALL data (including new text fields) ---
+        # --- 1. Get ALL data ---
         question = data.get("question", "")
         event_type = data.get("event_type", "churn")
         
-        # Original numerical inputs
         satisfaction = float(data.get("satisfaction", 0))
         monthly_revenue = float(data.get("monthly_revenue", 0))
         open_tickets = int(data.get("open_tickets", 0))
@@ -126,12 +110,13 @@ def predict():
         # --- 4. Build the Final JSON ---
         churn_binary = "Yes" if (revenue_drop > 15 or satisfaction < 40) else "No"
 
+        # FIX 4: Convert numpy float32 types to standard python floats for JSON
         result = {
             "revenue_drop": round(float(revenue_drop), 2),
             "workload_increase": round(float(workload_change), 2),
             "trust_drop": round(float(trust_drop), 2),
-            "recommendation": recommendation, # Dynamic
-            "narrative": narrative,           # Dynamic
+            "recommendation": recommendation,
+            "narrative": narrative,
             "churn_prediction": churn_binary,
             "churn_accuracy_percent": 91.6,
             "agent": event_type 
@@ -140,7 +125,6 @@ def predict():
         return jsonify(result)
 
     except Exception as e:
-        # Returns the error and traceback to the client for debugging
         return jsonify({"error": str(e), "trace": traceback.format_exc()})
 
 if __name__ == "__main__":
