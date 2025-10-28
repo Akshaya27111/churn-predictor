@@ -5,6 +5,7 @@ import traceback
 # -----------------------------------------------------------------
 # ▼▼▼ NEW IMPORTS FOR NLP ▼▼▼
 # -----------------------------------------------------------------
+# We use the smaller L3 model to fit Render's 512MB memory limit
 from sentence_transformers import SentenceTransformer, util
 import torch
 # -----------------------------------------------------------------
@@ -20,10 +21,8 @@ app = Flask(__name__)
 models = joblib.load("xgboost_model.pkl")
 
 # 2. Load your new NLP model (Sentence Transformer)
-# This will download the model the first time it runs.
-# On Render, this might make your app's "cold start" take 1-2 minutes.
-print("Loading NLP model...")
-nlp_model = SentenceTransformer('all-MiniLM-L6-v2')
+print("Loading memory-efficient NLP model (L3)...")
+nlp_model = SentenceTransformer('all-MiniLM-L3-v2')
 print("NLP model loaded.")
 # -----------------------------------------------------------------
 # ▲▲▲ END OF MODEL LOADING ▲▲▲
@@ -31,10 +30,9 @@ print("NLP model loaded.")
 
 
 # -----------------------------------------------------------------
-# ▼▼▼ NEW DYNAMIC TEXT LOGIC (USING NLP) ▼▼▼
+# ▼▼▼ DYNAMIC TEXT LOGIC (USING NLP) ▼▼▼
 # -----------------------------------------------------------------
 # 1. Define your main churn topics and their pre-written responses
-# This is much cleaner than an if/else block
 churn_responses = {
     "pricing": {
         "narrative": "Users are citing high cost or better pricing from competitors as their reason for leaving.",
@@ -62,16 +60,14 @@ churn_responses = {
     }
 }
 
-# 2. Pre-calculate the embeddings for your topics
-# This makes the API fast because it only does this once on startup
+# 2. Pre-calculate the embeddings for your topics (only happens once on startup)
 churn_topics = list(churn_responses.keys())
 churn_topic_embeddings = nlp_model.encode(churn_topics, convert_to_tensor=True)
-print("Churn topic embeddings calculated.")
 
 
 def get_dynamic_text(question):
     """
-    Finds the most relevant churn topic for a user's question.
+    Uses semantic search (NLP) to find the most relevant churn topic for a user's question.
     """
     if not question:
         return churn_responses["default"]["narrative"], churn_responses["default"]["recommendation"]
@@ -82,13 +78,11 @@ def get_dynamic_text(question):
     # 2. Find the similarity between the question and your topics
     similarity_scores = util.cos_sim(question_embedding, churn_topic_embeddings)
     
-    # 3. Get the best match
+    # 3. Get the best match based on semantic closeness
     best_match_index = torch.argmax(similarity_scores)
     best_match_topic = churn_topics[best_match_index]
     
-    print(f"Question matched to topic: {best_match_topic}")
-    
-    # 4. Return the correct narrative and recommendation
+    # 4. Return the corresponding narrative and recommendation
     response = churn_responses[best_match_topic]
     return response["narrative"], response["recommendation"]
 # -----------------------------------------------------------------
@@ -105,10 +99,11 @@ def predict():
     try:
         data = request.get_json()
         
-        # --- 1. Get ALL data ---
+        # --- 1. Get ALL data (including new text fields) ---
         question = data.get("question", "")
         event_type = data.get("event_type", "churn")
         
+        # Original numerical inputs
         satisfaction = float(data.get("satisfaction", 0))
         monthly_revenue = float(data.get("monthly_revenue", 0))
         open_tickets = int(data.get("open_tickets", 0))
@@ -116,7 +111,7 @@ def predict():
         tenure_months = int(data.get("tenure_months", 0))
         usage_active_pct = float(data.get("usage_active_pct", 0))
 
-        # --- 2. Run the ML Model (No change here) ---
+        # --- 2. Run the ML Model ---
         revenue_scaled = monthly_revenue / 1_000_000
         X = np.array([[satisfaction, revenue_scaled, open_tickets,
                        churn_history_rate, tenure_months, usage_active_pct]])
@@ -125,7 +120,7 @@ def predict():
         workload_change = models['workload'].predict(X)[0]
         trust_drop = models['trust'].predict(X)[0]
         
-        # --- 3. Generate Dynamic Text (Using the new NLP function) ---
+        # --- 3. Generate Dynamic Text ---
         narrative, recommendation = get_dynamic_text(question)
         
         # --- 4. Build the Final JSON ---
@@ -133,7 +128,7 @@ def predict():
 
         result = {
             "revenue_drop": round(float(revenue_drop), 2),
-            "workload_increase": round(float(workload_change), 2), # Using 'workload_increase'
+            "workload_increase": round(float(workload_change), 2),
             "trust_drop": round(float(trust_drop), 2),
             "recommendation": recommendation, # Dynamic
             "narrative": narrative,           # Dynamic
@@ -145,7 +140,8 @@ def predict():
         return jsonify(result)
 
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_C()})
+        # Returns the error and traceback to the client for debugging
+        return jsonify({"error": str(e), "trace": traceback.format_exc()})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
