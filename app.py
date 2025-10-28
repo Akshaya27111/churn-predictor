@@ -5,7 +5,7 @@ import traceback
 
 app = Flask(__name__)
 # ✅ Load the trained XGBoost model
-model = joblib.load("xgboost_model.pkl")
+model = joblib.load("xgboost_model.pkl")['model']
 
 @app.route("/")
 def home():
