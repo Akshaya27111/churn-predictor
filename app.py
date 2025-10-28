@@ -4,8 +4,8 @@ import numpy as np
 import traceback
 
 app = Flask(__name__)
-# ✅ Load the trained XGBoost model
-model = joblib.load("xgboost_model.pkl")['model']
+# ✅ Load the dictionary of trained models
+models = joblib.load("xgboost_model.pkl")
 
 @app.route("/")
 def home():
@@ -27,9 +27,16 @@ def predict():
         X = np.array([[satisfaction, revenue_scaled, open_tickets,
                        churn_history_rate, tenure_months, usage_active_pct]])
 
-        # Predict
-        y_pred = model.predict(X)[0]
-        revenue_drop, workload_change, trust_drop = y_pred
+        # -----------------------------------------------------------------
+        # ▼▼▼ THIS IS THE NEW, CORRECTED CODE ▼▼▼
+        # -----------------------------------------------------------------
+        # Predict using each model from the dictionary
+        revenue_drop = models['revenue'].predict(X)[0]
+        workload_change = models['workload'].predict(X)[0]
+        trust_drop = models['trust'].predict(X)[0]
+        # -----------------------------------------------------------------
+        # ▲▲▲ END OF NEW CODE ▲▲▲
+        # -----------------------------------------------------------------
 
         # Churn logic
         churn_binary = "Yes" if (revenue_drop > 15 or satisfaction < 40) else "No"
