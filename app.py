@@ -27,16 +27,10 @@ def predict():
         X = np.array([[satisfaction, revenue_scaled, open_tickets,
                        churn_history_rate, tenure_months, usage_active_pct]])
 
-        # -----------------------------------------------------------------
-        # ▼▼▼ THIS IS THE NEW, CORRECTED CODE ▼▼▼
-        # -----------------------------------------------------------------
         # Predict using each model from the dictionary
         revenue_drop = models['revenue'].predict(X)[0]
         workload_change = models['workload'].predict(X)[0]
         trust_drop = models['trust'].predict(X)[0]
-        # -----------------------------------------------------------------
-        # ▲▲▲ END OF NEW CODE ▲▲▲
-        # -----------------------------------------------------------------
 
         # Churn logic
         churn_binary = "Yes" if (revenue_drop > 15 or satisfaction < 40) else "No"
@@ -52,15 +46,22 @@ def predict():
             narrative = "Low churn risk. Customer relationship appears stable."
             recommendation = "Continue regular engagement activities."
 
+        # -----------------------------------------------------------------
+        # ▼▼▼ THIS IS THE FINAL FIX ▼▼▼
+        # -----------------------------------------------------------------
+        # Convert numpy float32 types to standard python floats for JSON
         result = {
-            "revenue_drop": round(revenue_drop, 2),
-            "workload_change": round(workload_change, 2),
-            "trust_drop": round(trust_drop, 2),
+            "revenue_drop": round(float(revenue_drop), 2),
+            "workload_change": round(float(workload_change), 2),
+            "trust_drop": round(float(trust_drop), 2),
             "narrative": narrative,
             "recommendation": recommendation,
             "churn_prediction": churn_binary,
             "churn_accuracy_percent": 91.6
         }
+        # -----------------------------------------------------------------
+        # ▲▲▲ END OF FIX ▲▲▲
+        # -----------------------------------------------------------------
 
         return jsonify(result)
 
